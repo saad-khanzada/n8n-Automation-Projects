@@ -5,47 +5,19 @@ These projects demonstrate how intelligent automations can simplify communicatio
 
 ---
 
-##  Project Overview
+## 📂 Project Index
 
-### 1.  AI RAG Agent
-**Description:**  
-An intelligent Retrieval-Augmented Generation (RAG) agent designed using **n8n**, **Supabase**, and the **Gemini API**.  
+| **Project Name** | **Description** | **Folder Link** |
+|------------------|-----------------|-----------------|
+| 🧠 **AI RAG Agent** | A Retrieval-Augmented Generation (RAG) agent using n8n, Supabase, and Gemini API. It stores, chunks, and retrieves context from PDF documents for intelligent Q&A. | [View Project →](./AI-RAG-Agent) |
+| 📧 **Gmail Automation Agent** | A workflow that integrates Google Contacts, Gmail, and Gemini API to auto-generate and send personalized emails via chat commands. | [View Project →](./Gmail-Automation-Agent) |
 
-**Core Functionality:**
-- Ingests and chunks PDF data into a **Supabase vector database**.  
-- Uses a **chat trigger**: when a user asks a question, it retrieves relevant sections from stored data.  
-- Generates context-aware, fact-based answers using the **Gemini LLM**.  
+> More projects will be added soon as this repository expands with new intelligent workflows.
 
-**Use Case Example:**  
-This implementation uses the *OECD 2023 Report: “Emerging Trends in AI Skill Demand Across 14 OECD Countries”* to answer policy-related or educational trend questions with precision.  
-
-**Tech Stack:**  
-`n8n` · `Supabase` · `Gemini API` · `Vector Embeddings`  
-
-📁 [AI RAG Agent →](./AI-RAG-Agent/README.md)
 
 ---
 
-### 2.  Gmail Automation Agent
-**Description:**  
-A fully automated **email generation and sending workflow** that integrates **Google Contacts**, **Gmail**, and the **Gemini API** inside n8n.  
-
-**Core Functionality:**
-- Triggered via chat input.  
-- When a user says: “Write an email to [Name]”, the system:
-  1. Searches Google Contacts for the name.  
-  2. If found → drafts and sends an AI-written email via Gmail.  
-  3. If not found → prompts the user to enter an address, then sends the generated message automatically.  
-- Utilizes the **Gemini API** for tone, structure, and content generation.  
-
-**Tech Stack:**  
-`n8n` · `Google Contacts API` · `Gmail API` · `Gemini API`  
-
-📁 [Gmail Automation Agent →](./Gmail-Automation-Agent/README.md)
-
----
-
-## ⚙️ Setup & Usage
+## ⚙️ Quick Setup Guide
 
 1. **Clone this Repository**
    ```bash
