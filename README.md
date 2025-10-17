@@ -56,7 +56,6 @@ A fully automated **email generation and sending workflow** that integrates **Go
 
 
 
-   ## ⚙️ How to Use
 
 ### 🧩 2. Import a Workflow
 1. Open your **n8n Dashboard** → navigate to **Workflows** → click **Import from File**.  
