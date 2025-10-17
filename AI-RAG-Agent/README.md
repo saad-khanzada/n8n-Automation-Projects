@@ -72,7 +72,7 @@ The agent responds with **evidence-based summaries** derived directly from the d
 
 ##  About the Developer
 
-Developed by **Saad**, a BSCS student specializing in **Artificial Intelligence**, **NLP**, and **Automation Systems**.  
+Developed by **Saad**,  specializing in **Artificial Intelligence**, **NLP**, and **Automation Systems**.  
 Focused on creating scalable, real-world AI-driven automations through open-source experimentation.
 
 > “Turning static data into intelligent, conversational knowledge systems.”
