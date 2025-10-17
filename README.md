@@ -1,13 +1,13 @@
-# 🤖 n8n Automation Projects by Saad
+#  n8n Automation Projects by Saad
 
 A curated collection of **AI-driven automation workflows** built with [n8n](https://n8n.io/), leveraging **Gemini API**, **Supabase**, and various Google integrations.  
 These projects demonstrate how intelligent automations can simplify communication, enhance productivity, and integrate AI reasoning into real-world workflows.
 
 ---
 
-## 🧩 Project Overview
+##  Project Overview
 
-### 1. 🧠 AI RAG Agent
+### 1.  AI RAG Agent
 **Description:**  
 An intelligent Retrieval-Augmented Generation (RAG) agent designed using **n8n**, **Supabase**, and the **Gemini API**.  
 
@@ -26,7 +26,7 @@ This implementation uses the *OECD 2023 Report: “Emerging Trends in AI Skill D
 
 ---
 
-### 2. 📧 Gmail Automation Agent
+### 2.  Gmail Automation Agent
 **Description:**  
 A fully automated **email generation and sending workflow** that integrates **Google Contacts**, **Gmail**, and the **Gemini API** inside n8n.  
 
@@ -57,13 +57,13 @@ A fully automated **email generation and sending workflow** that integrates **Go
 
 
 
-### 🧩 2. Import a Workflow
+###  2. Import a Workflow
 1. Open your **n8n Dashboard** → navigate to **Workflows** → click **Import from File**.  
 2. Select the appropriate **`.json`** file from the desired project folder.
 
 ---
 
-### 🔧 3. Configure Environment
+###  3. Configure Environment
 1. Add required **API Keys**:
    - **Gemini API**
    - **Supabase API**
@@ -74,13 +74,13 @@ A fully automated **email generation and sending workflow** that integrates **Go
 
 ---
 
-### 🚀 4. Run the Workflow
+###  4. Run the Workflow
 1. Test the automation **interactively via chat trigger**, or  
 2. Schedule it to run automatically using **n8n’s built-in triggers**.
 
 ---
 
-## 🧠 Tech Summary
+##  Tech Summary
 
 | **Technology** | **Purpose** |
 |-----------------|-------------|
@@ -91,7 +91,7 @@ A fully automated **email generation and sending workflow** that integrates **Go
 
 ---
 
-## 🚀 Future Roadmap
+##  Future Roadmap
 
 | **Planned Workflow** | **Description** |
 |------------------------|-----------------|
