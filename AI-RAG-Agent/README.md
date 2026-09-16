@@ -36,7 +36,7 @@ The agent responds with **evidence-based summaries** derived directly from the d
 ### 1️ Import Workflow
 - Open your **n8n dashboard**
 - Navigate to → *Workflows → Import from File*
-- Select the JSON file from this folder (`rag_workflow.json`)
+- Select the JSON file from this folder (`AI-RAG-Agent.json`)
 
 ### 2️ Configure Environment
 - Add and configure the following API keys:
