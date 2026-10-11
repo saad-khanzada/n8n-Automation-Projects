@@ -1,0 +1,3465 @@
+{
+  "name": "AI Lead Qualification - Error Handler",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "22bd325e-4442-4123-94f4-86e7db3fa6c2",
+      "name": "Error Trigger"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const data = $json;\n\nconst execution = data.execution ?? {};\nconst trigger = data.trigger ?? {};\nconst workflow = data.workflow ?? {};\n\nconst triggerError = trigger.error ?? {};\nconst executionError = execution.error ?? {};\n\n// Execution ID may legitimately be missing if the failure\n// happened in the trigger before a workflow execution existed.\nconst executionId =\n  execution.id !== undefined && execution.id !== null\n    ? String(execution.id).trim()\n    : '';\n\n// Prefer the normal execution error message.\n// Fall back safely for trigger-level failures.\nconst errorMessage =\n  executionError.message ||\n  triggerError.message ||\n  triggerError.cause?.message ||\n  'Unknown workflow error';\n\n// Preserve the node that failed whenever n8n provides it.\nconst failedNode =\n  execution.lastNodeExecuted ||\n  triggerError.node?.name ||\n  '';\n\n// Preserve error name when available.\nconst errorName =\n  executionError.name ||\n  triggerError.name ||\n  '';\n\n// Keep workflow identity for debugging and safety.\nconst workflowId =\n  workflow.id !== undefined && workflow.id !== null\n    ? String(workflow.id).trim()\n    : '';\n\nconst workflowName =\n  typeof workflow.name === 'string'\n    ? workflow.name\n    : '';\n\n// Identify whether the error came from a normal execution\n// or directly from a trigger-level failure.\nconst errorSource =\n  trigger.error\n    ? 'TRIGGER'\n    : execution.error\n      ? 'EXECUTION'\n      : 'UNKNOWN';\n\n// Select the actual structured error object for deeper details.\nconst structuredError =\n  executionError &&\n  typeof executionError === 'object' &&\n  Object.keys(executionError).length > 0\n    ? executionError\n    : triggerError &&\n      typeof triggerError === 'object' &&\n      Object.keys(triggerError).length > 0\n      ? triggerError\n      : {};\n\n// Helper: return the first meaningful value.\nconst firstNonEmpty = (...values) => {\n  for (const value of values) {\n    if (\n      value !== undefined &&\n      value !== null &&\n      String(value).trim() !== ''\n    ) {\n      return value;\n    }\n  }\n\n  return '';\n};\n\n// Optional longer error description.\nconst errorDescription = String(\n  firstNonEmpty(\n    structuredError.description,\n    ''\n  )\n);\n\n// Extract HTTP status when n8n/provider supplies one.\nconst httpStatusRaw = firstNonEmpty(\n  structuredError.httpCode,\n  structuredError.statusCode,\n  structuredError.response?.status,\n  structuredError.cause?.statusCode,\n  structuredError.cause?.response?.status\n);\n\nconst parsedHttpStatus =\n  httpStatusRaw === ''\n    ? NaN\n    : Number.parseInt(String(httpStatusRaw), 10);\n\nconst httpStatus =\n  Number.isFinite(parsedHttpStatus)\n    ? parsedHttpStatus\n    : null;\n\n// Extract a structured provider/API error code when available.\nconst providerErrorCode = String(\n  firstNonEmpty(\n    structuredError.errorCode,\n    structuredError.code,\n    structuredError.response?.data?.error?.status,\n    structuredError.response?.data?.error?.code,\n    structuredError.cause?.code,\n    ''\n  )\n).trim();\n\nreturn {\n  json: {\n    execution_id: executionId,\n\n    execution_url:\n      typeof execution.url === 'string'\n        ? execution.url\n        : '',\n\n    retry_of:\n      execution.retryOf !== undefined && execution.retryOf !== null\n        ? String(execution.retryOf)\n        : '',\n\n    execution_mode:\n      execution.mode ||\n      trigger.mode ||\n      '',\n\n    failed_node: failedNode,\n\n    workflow_id: workflowId,\n    workflow_name: workflowName,\n\n    error_name: errorName,\n    error_message: String(errorMessage),\n\n    error_description: errorDescription,\n    http_status: httpStatus,\n    provider_error_code: providerErrorCode,\n\n    error_source: errorSource,\n\n    // Safety flag for the next step.\n    // We will only attempt lead lookup when this is true.\n    can_lookup_by_execution_id: executionId.length > 0\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        0
+      ],
+      "id": "c7fcec6b-e850-4dae-84dc-fae9f617061b",
+      "name": "Normalize Error Details"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const failedNode = String($json.failed_node || '').trim();\n\nconst beforeGmailNodes = new Set([\n  'On form submission',\n  'Normalize Input',\n  'Input Validation',\n  'Log INVALID_INPUT',\n  'Duplicate Check - New Lead',\n  'Save PROCESSING State',\n  'AI Lead Extraction',\n  'Validate AI JSON',\n  'Mark AI_OUTPUT_INVALID',\n  'Queue AI_OUTPUT_INVALID Review',\n  'Business Rules - Lead Scoring',\n  'Route Lead Status',\n  'Mark REVIEW',\n  'Queue LEAD_REVIEW',\n  'AI Email Draft',\n  'Email Guardrails',\n  'Mark EMAIL_DRAFT_INVALID',\n  'Queue EMAIL_DRAFT_INVALID Review',\n  'Mark EMAIL_READY',\n]);\n\nconst atGmailNodes = new Set([\n  'Gmail Send',\n]);\n\nconst afterGmailNodes = new Set([\n  'Update Final State',\n  'Update AI Lead CRM',\n]);\n\nlet failureStage = 'UNKNOWN';\n\nif (beforeGmailNodes.has(failedNode)) {\n  failureStage = 'BEFORE_GMAIL';\n} else if (atGmailNodes.has(failedNode)) {\n  failureStage = 'AT_GMAIL';\n} else if (afterGmailNodes.has(failedNode)) {\n  failureStage = 'AFTER_GMAIL';\n}\n\nreturn {\n  json: {\n    ...$json,\n    failure_stage: failureStage,\n    classification_basis: failedNode || 'No failed node provided',\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "e5cbe42c-a4f3-4996-8c33-62c970c39fc2",
+      "name": "Classify Failure Stage",
+      "notes": "MAINTENANCE RULE:\nThis classifier uses exact main-workflow node names.\n\nIf a relevant main-workflow node is renamed, removed, replaced, or newly inserted around the Gmail boundary, review and update beforeGmailNodes, atGmailNodes, and afterGmailNodes before publishing.\n\nAny unrecognized node must remain UNKNOWN until the exact-name map is intentionally updated.\n\nDo not use fuzzy name matching or error-message text to infer the workflow stage."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6295f2d5-a4d7-4f5d-a9d6-fdc29d9cef33",
+              "leftValue": "={{ $json.can_lookup_by_execution_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "5902f84e-424b-4058-b701-07bc586685b0",
+              "leftValue": "={{ String($json.execution_id || '').trim() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        0
+      ],
+      "id": "ce5cc87c-bf8b-439f-8ab5-b5daf80e5f96",
+      "name": "Can Lookup Lead?"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        896,
+        -48
+      ],
+      "id": "71040513-496a-4c6d-81f7-6a2f0741c37c",
+      "name": "Lookup Lead by Execution ID",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c0ff23ec-bf52-4875-a0cf-f2af3bf27472",
+              "leftValue": "={{ String($json.lead_id || '').trim() }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "4b9358f1-2912-42c4-97fc-af78db3f3f15",
+              "leftValue": "={{ String($json.execution_id || '').trim() }}",
+              "rightValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        -48
+      ],
+      "id": "af07af3b-cc3c-4c49-8f80-7df988f9d21a",
+      "name": "Lead Row Found?"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Classify Failure Stage').first().json.failure_stage }}",
+                    "rightValue": "BEFORE_GMAIL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "6abfedd5-35cf-48ef-9838-fe817bba9626"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "BEFORE_GMAIL"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a840e10f-d703-4bb0-8331-c861fac804ec",
+                    "leftValue": "={{ $('Classify Failure Stage').first().json.failure_stage }}",
+                    "rightValue": "AT_GMAIL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "AT_GMAIL"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "f6a22f3a-474d-4755-87b2-58431d4b4751",
+                    "leftValue": "={{ $('Classify Failure Stage').first().json.failure_stage }}",
+                    "rightValue": "AFTER_GMAIL",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "AFTER_GMAIL"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b8546961-ab73-4b14-9507-6f0fd0a1af8d",
+                    "leftValue": "={{ $('Classify Failure Stage').first().json.failure_stage }}",
+                    "rightValue": "UNKNOWN",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "UNKNOWN"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "ignoreCase": false,
+          "allMatchingOutputs": false
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1328,
+        -112
+      ],
+      "id": "381a5a77-7f43-44b9-9c66-b70f9e316c22",
+      "name": "Route Failure Stage"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "execution_id": "={{ $('Normalize Error Details').first().json.execution_id || '' }}",
+            "review_reason": "UNRESOLVED_MISSING_EXECUTION_ID",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ 'Execution ID is missing, so the related lead could not be identified. No lead_processing lookup or update was performed, and no Gmail retry or resend was attempted. Manual review required: inspect the Error Trigger payload and available workflow error details to determine why the execution ID is missing before taking any lead or email action. Original error: ' + String($('Normalize Error Details').first().json.error_message || 'No error message was provided') }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        896,
+        208
+      ],
+      "id": "76fa5c60-a199-4908-a6de-b8a34f2770e2",
+      "name": "Queue Missing Execution Review"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "execution_id": "={{ $('Normalize Error Details').first().json.execution_id }}",
+            "review_reason": "UNRESOLVED_LEAD_NOT_FOUND",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ 'Execution ID was provided, but no matching lead was found in lead_processing. A lookup was performed, but no lead_processing row was updated and no Gmail retry or resend was attempted. Manual review required: verify the execution ID and inspect the available workflow error details before taking any lead or email action. Original error: ' + String($('Normalize Error Details').first().json.error_message || 'No error message was provided') }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1328,
+        208
+      ],
+      "id": "24d30b63-5d93-4554-9fe0-d3109ebed758",
+      "name": "Queue Lead Not Found Review"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            },
+            {
+              "keyName": "email_status",
+              "condition": "neq",
+              "keyValue": "EMAIL_SENT"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processing_status": "FAILED",
+            "email_status": "NOT_READY",
+            "error_code": "RUNTIME_BEFORE_GMAIL",
+            "error_message": "={{ 'Node: ' + String($('Normalize Error Details').first().json.failed_node || 'Unknown') + ' | Message: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown workflow error') }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processing_status",
+              "displayName": "processing_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "lead_score",
+              "displayName": "lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "gmail_message_id",
+              "displayName": "gmail_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "error_code",
+              "displayName": "error_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "model_name",
+              "displayName": "model_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "workflow_version",
+              "displayName": "workflow_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2352,
+        -240
+      ],
+      "id": "196fbc7d-5442-4152-b7e1-e5a4043c4e78",
+      "name": "Persist BEFORE_GMAIL Failure",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2560,
+        -240
+      ],
+      "id": "6e36eee8-79fd-4c15-810a-09f1ae062da3",
+      "name": "Read Back BEFORE_GMAIL State",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "35bc71e5-af10-4506-822d-d0f549bfeb53",
+              "leftValue": "={{ String($json.processing_status || '').trim() }}",
+              "rightValue": "FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "79770544-79dd-478b-a5d4-9baa74ccc151",
+              "leftValue": "={{ String($json.email_status || '').trim() }}",
+              "rightValue": "NOT_READY",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "482c5077-60fa-4d7f-83e6-60e05961ddda",
+              "leftValue": "={{ String($json.error_code || '').trim() }}",
+              "rightValue": "RUNTIME_BEFORE_GMAIL",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2848,
+        -240
+      ],
+      "id": "179857e6-adc2-4c14-9e0b-984480ef030b",
+      "name": "Verify BEFORE_GMAIL Persistence"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "lead_id": "={{ $('Lookup Lead by Execution ID').first().json.lead_id || '' }}",
+            "execution_id": "={{ $('Lookup Lead by Execution ID').first().json.execution_id || $('Normalize Error Details').first().json.execution_id || '' }}",
+            "email": "={{ $('Lookup Lead by Execution ID').first().json.email || '' }}",
+            "review_reason": "BEFORE_GMAIL_PERSISTENCE_CONFLICT",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ 'Original runtime error: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown workflow error') + ' | BEFORE_GMAIL persistence verification failed. No further lead update or Gmail action was performed.' }}",
+            "email_status": "={{ $('Read Back BEFORE_GMAIL State').first().json.email_status || $('Lookup Lead by Execution ID').first().json.email_status || '' }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3392,
+        -224
+      ],
+      "id": "6b3d9691-b00f-48ad-b6ab-d9fcaafbc827",
+      "name": "Queue BEFORE_GMAIL Persistence Conflict"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "lead_id": "={{ $json.lead_id || '' }}",
+            "execution_id": "={{ $json.execution_id || $('Normalize Error Details').first().json.execution_id || '' }}",
+            "email": "={{ $json.email || '' }}",
+            "review_reason": "={{ $json.error_code || 'RUNTIME_ERROR' }}",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ $json.error_message || $('Normalize Error Details').first().json.error_message || 'Unknown workflow error' }}",
+            "email_status": "={{ $json.email_status || '' }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3392,
+        -432
+      ],
+      "id": "9436ba53-b7d3-44c2-9904-a47229de27b1",
+      "name": "Queue Matched Error Review"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const error =\n  $('Normalize Error Details').first().json;\n\nconst httpStatus =\n  error.http_status === null ||\n  error.http_status === undefined\n    ? null\n    : Number(error.http_status);\n\nconst providerCode =\n  String(error.provider_error_code || '')\n    .trim()\n    .toUpperCase();\n\nconst provenNotAcceptedHttpStatuses = new Set([\n  400,\n  401,\n  403,\n  404,\n  405,\n  413,\n  415,\n  422,\n  429,\n]);\n\nconst provenNotAcceptedProviderCodes = new Set([\n  'INVALID_GRANT',\n  'INVALID_REQUEST',\n  'UNAUTHENTICATED',\n  'UNAUTHORIZED',\n  'PERMISSION_DENIED',\n  'FORBIDDEN',\n]);\n\nlet gmailOutcome = 'SEND_UNCERTAIN';\nlet gmailOutcomeBasis =\n  'No structured proof that Gmail rejected the send';\n\nif (\n  Number.isInteger(httpStatus) &&\n  provenNotAcceptedHttpStatuses.has(httpStatus)\n) {\n  gmailOutcome = 'SEND_FAILED';\n  gmailOutcomeBasis =\n    `Structured HTTP rejection: ${httpStatus}`;\n} else if (\n  providerCode &&\n  provenNotAcceptedProviderCodes.has(providerCode)\n) {\n  gmailOutcome = 'SEND_FAILED';\n  gmailOutcomeBasis =\n    `Structured provider rejection: ${providerCode}`;\n}\n\nreturn {\n  json: {\n    ...$json,\n    gmail_outcome: gmailOutcome,\n    gmail_outcome_basis: gmailOutcomeBasis,\n  },\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        -64
+      ],
+      "id": "d9f57235-5381-4081-ab7e-9db429cdfe76",
+      "name": "Classify Gmail Outcome"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.gmail_outcome }}",
+                    "rightValue": "SEND_FAILED",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "a332f642-f3e3-4433-bafd-0105b24cbbb4"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SEND_FAILED"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b5e520dd-35c2-4fcc-a79b-bc2f83110c4e",
+                    "leftValue": "={{ $json.gmail_outcome }}",
+                    "rightValue": "SEND_UNCERTAIN",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "SEND_UNCERTAIN"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "ignoreCase": false,
+          "allMatchingOutputs": false
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2064,
+        -80
+      ],
+      "id": "dac59df7-9643-4f13-b781-2792f841bfa8",
+      "name": "Route Gmail Outcome"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            },
+            {
+              "keyName": "email_status",
+              "condition": "neq",
+              "keyValue": "EMAIL_SENT"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processing_status": "FAILED",
+            "email_status": "SEND_FAILED",
+            "error_code": "GMAIL_SEND_FAILED",
+            "error_message": "={{ 'Node: ' + String($('Normalize Error Details').first().json.failed_node || 'Gmail Send') + ' | Message: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown Gmail error') + ' | Outcome basis: ' + String($('Classify Gmail Outcome').first().json.gmail_outcome_basis || '') }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processing_status",
+              "displayName": "processing_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "lead_score",
+              "displayName": "lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "gmail_message_id",
+              "displayName": "gmail_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "error_code",
+              "displayName": "error_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "model_name",
+              "displayName": "model_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "workflow_version",
+              "displayName": "workflow_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2368,
+        -32
+      ],
+      "id": "53a4d128-c5f3-4189-be75-15093d6b1886",
+      "name": "Persist SEND_FAILED",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2576,
+        -32
+      ],
+      "id": "90af1667-3bf1-4ae5-a52e-0cdde1d606f7",
+      "name": "Read Back SEND_FAILED State",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "17306b2f-dd93-4452-a3b3-72e8dc7e917c",
+              "leftValue": "={{ String($json.processing_status || '').trim() }}",
+              "rightValue": "FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "6960e555-c6a2-41e9-a0d2-70f2caf8ba25",
+              "leftValue": "={{ String($json.email_status || '').trim() }}",
+              "rightValue": "SEND_FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "c8fc664e-72a3-440f-9384-0f4f8f05b392",
+              "leftValue": "={{ String($json.error_code || '').trim() }}",
+              "rightValue": "GMAIL_SEND_FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2864,
+        -32
+      ],
+      "id": "d671c646-c08b-46cb-bdfe-5cc7955fa07b",
+      "name": "Verify SEND_FAILED Persistence"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "lead_id": "={{ $('Lookup Lead by Execution ID').first().json.lead_id || '' }}",
+            "execution_id": "={{ $('Lookup Lead by Execution ID').first().json.execution_id || $('Normalize Error Details').first().json.execution_id || '' }}",
+            "email": "={{ $('Lookup Lead by Execution ID').first().json.email || '' }}",
+            "review_reason": "SEND_FAILED_PERSISTENCE_CONFLICT",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ 'Original runtime error: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown Gmail error') + ' | SEND_FAILED persistence verification failed. No further lead update or Gmail action was performed.' }}",
+            "email_status": "={{ $('Read Back SEND_FAILED State').first().json.email_status || $('Lookup Lead by Execution ID').first().json.email_status || '' }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3392,
+        -16
+      ],
+      "id": "55ccb3cc-b219-4680-8bc2-46b4dcb8d2e6",
+      "name": "Queue SEND_FAILED Persistence Conflict"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            },
+            {
+              "keyName": "email_status",
+              "condition": "neq",
+              "keyValue": "EMAIL_SENT"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processing_status": "FAILED",
+            "email_status": "SEND_UNCERTAIN",
+            "error_code": "GMAIL_SEND_UNCERTAIN",
+            "error_message": "={{ 'Node: ' + String($('Normalize Error Details').first().json.failed_node || 'Gmail Send') + ' | Message: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown Gmail error') + ' | Outcome basis: ' + String($('Classify Gmail Outcome').first().json.gmail_outcome_basis || 'Send outcome could not be proven') }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processing_status",
+              "displayName": "processing_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "lead_score",
+              "displayName": "lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "gmail_message_id",
+              "displayName": "gmail_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "error_code",
+              "displayName": "error_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "model_name",
+              "displayName": "model_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "workflow_version",
+              "displayName": "workflow_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2384,
+        192
+      ],
+      "id": "78bdafac-dd92-42f4-afe1-0c54c9169fe3",
+      "name": "Persist SEND_UNCERTAIN",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2576,
+        192
+      ],
+      "id": "2ecd822e-de00-41c5-bf34-12c603301f2c",
+      "name": "Read Back SEND_UNCERTAIN State",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "71caeffd-87d5-4461-a585-6ff6f347f6e8",
+              "leftValue": "={{ String($json.processing_status || '').trim() }}",
+              "rightValue": "FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "65a8dd6f-989c-467c-b613-6eb8c3c121e8",
+              "leftValue": "={{ String($json.email_status || '').trim() }}",
+              "rightValue": "SEND_UNCERTAIN",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "706059fe-dfab-4aff-b0ac-366b66495aa4",
+              "leftValue": "={{ String($json.error_code || '').trim() }}",
+              "rightValue": "GMAIL_SEND_UNCERTAIN",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2880,
+        192
+      ],
+      "id": "254d35b8-9dc3-4e98-943f-b09cdafa5827",
+      "name": "Verify SEND_UNCERTAIN Persistence"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "lead_id": "={{ $('Lookup Lead by Execution ID').first().json.lead_id || '' }}",
+            "execution_id": "={{ $('Lookup Lead by Execution ID').first().json.execution_id || $('Normalize Error Details').first().json.execution_id || '' }}",
+            "email": "={{ $('Lookup Lead by Execution ID').first().json.email || '' }}",
+            "review_reason": "SEND_UNCERTAIN_PERSISTENCE_CONFLICT",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ 'Original runtime error: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown Gmail error') + ' | SEND_UNCERTAIN persistence verification failed. The expected SEND_UNCERTAIN state could not be confirmed. No further lead update or Gmail retry/resend was performed. Manual review required: check the failed execution and current lead state before taking any email action.' }}",
+            "email_status": "={{ $('Read Back SEND_UNCERTAIN State').first().json.email_status || $('Lookup Lead by Execution ID').first().json.email_status || '' }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3392,
+        208
+      ],
+      "id": "7ddb09ae-8292-4d14-8b41-ed43955fc960",
+      "name": "Queue SEND_UNCERTAIN Persistence Conflict"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processing_status": "FAILED",
+            "email_status": "EMAIL_SENT",
+            "error_code": "={{ $('Normalize Error Details').first().json.failed_node === 'Update Final State' ? 'FINAL_STATE_UPDATE_FAILED' : $('Normalize Error Details').first().json.failed_node === 'Update AI Lead CRM' ? 'CRM_UPDATE_FAILED' : 'RUNTIME_AFTER_GMAIL' }}",
+            "error_message": "={{ 'Node: ' + String($('Normalize Error Details').first().json.failed_node || 'Unknown') + ' | Message: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown workflow error') }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processing_status",
+              "displayName": "processing_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "lead_score",
+              "displayName": "lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "gmail_message_id",
+              "displayName": "gmail_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "error_code",
+              "displayName": "error_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "model_name",
+              "displayName": "model_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "workflow_version",
+              "displayName": "workflow_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2384,
+        416
+      ],
+      "id": "1539c93c-f65e-4495-9541-3027e1765a94",
+      "name": "Persist AFTER_GMAIL Failure",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2592,
+        416
+      ],
+      "id": "c800521b-dfc0-45fd-80dd-794dfe1b5f3b",
+      "name": "Read Back AFTER_GMAIL State",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "889f24ed-a017-4625-90db-4bea6924bfed",
+              "leftValue": "={{ String($json.processing_status || '').trim() }}",
+              "rightValue": "FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "99861f93-dc26-4d3f-acee-411f3528998c",
+              "leftValue": "={{ String($json.email_status || '').trim() }}",
+              "rightValue": "EMAIL_SENT",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "8bc9c529-b4cb-4264-8c0c-e1da8e9f5a8f",
+              "leftValue": "={{ String($json.error_code || '').trim() }}",
+              "rightValue": "={{ $('Normalize Error Details').first().json.failed_node === 'Update Final State' ? 'FINAL_STATE_UPDATE_FAILED' : $('Normalize Error Details').first().json.failed_node === 'Update AI Lead CRM' ? 'CRM_UPDATE_FAILED' : 'RUNTIME_AFTER_GMAIL' }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2912,
+        416
+      ],
+      "id": "48a88cc4-dfb4-4dd6-956a-22ee14985022",
+      "name": "Verify AFTER_GMAIL Persistence"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "lead_id": "={{ $('Lookup Lead by Execution ID').first().json.lead_id || '' }}",
+            "execution_id": "={{ $('Lookup Lead by Execution ID').first().json.execution_id || $('Normalize Error Details').first().json.execution_id || '' }}",
+            "email": "={{ $('Lookup Lead by Execution ID').first().json.email || '' }}",
+            "review_reason": "AFTER_GMAIL_PERSISTENCE_CONFLICT",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ 'Original runtime error: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown workflow error') + ' | AFTER_GMAIL persistence verification failed. The expected post-Gmail state could not be confirmed. No further lead update or Gmail retry/resend was performed. Manual review required: check the failed execution and current lead state before taking any email action.' }}",
+            "email_status": "={{ $('Read Back AFTER_GMAIL State').first().json.email_status || $('Lookup Lead by Execution ID').first().json.email_status || '' }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3392,
+        432
+      ],
+      "id": "cc18f106-7736-4bbd-b5b1-ad695aeb1bd3",
+      "name": "Queue AFTER_GMAIL Persistence Conflict"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            }
+          ]
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "processing_status": "FAILED",
+            "error_code": "RUNTIME_UNKNOWN",
+            "error_message": "={{ 'Node: ' + String($('Normalize Error Details').first().json.failed_node || 'Unknown') + ' | Message: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown workflow error') }}",
+            "processed_at": "={{ $now.toISO() }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "dedupe_key",
+              "displayName": "dedupe_key",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processing_status",
+              "displayName": "processing_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "lead_status",
+              "displayName": "lead_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "lead_score",
+              "displayName": "lead_score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "gmail_message_id",
+              "displayName": "gmail_message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "error_code",
+              "displayName": "error_code",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "model_name",
+              "displayName": "model_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "prompt_version",
+              "displayName": "prompt_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "workflow_version",
+              "displayName": "workflow_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": true
+            },
+            {
+              "id": "processed_at",
+              "displayName": "processed_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "readOnly": false,
+              "removed": false
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "readOnly": false,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2384,
+        656
+      ],
+      "id": "7b3ce097-0448-4606-bba9-5e03cfeb858f",
+      "name": "Persist UNKNOWN Failure",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "dataTableId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_LEAD_PROCESSING_TABLE_ID",
+          "mode": "list",
+          "cachedResultName": "lead_processing"
+        },
+        "matchType": "allConditions",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "execution_id",
+              "keyValue": "={{ String($('Normalize Error Details').first().json.execution_id || '').trim() }}"
+            },
+            {
+              "keyName": "lead_id",
+              "keyValue": "={{ String($('Lookup Lead by Execution ID').first().json.lead_id || '').trim() }}"
+            }
+          ]
+        },
+        "limit": 1
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1.1,
+      "position": [
+        2624,
+        656
+      ],
+      "id": "55f7cf2d-55fd-4ee5-b458-8ce36e07eef1",
+      "name": "Read Back UNKNOWN State",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8d0d83e7-0acf-4c96-9344-71a257da2705",
+              "leftValue": "={{ String($json.processing_status || '').trim() }}",
+              "rightValue": "FAILED",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "340cc9d0-5e37-46f4-99ca-2463a9d2071c",
+              "leftValue": "={{ String($json.error_code || '').trim() }}",
+              "rightValue": "RUNTIME_UNKNOWN",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "f69c5097-3bf5-4fb1-bdab-bceeb579f86a",
+              "leftValue": "={{ String($json.email_status ?? '') }}",
+              "rightValue": "={{ String($('Lookup Lead by Execution ID').first().json.email_status ?? '') }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "17217d92-6c5c-43d8-9fb0-1c333530cf42",
+              "leftValue": "={{ String($json.gmail_message_id ?? '') }}",
+              "rightValue": "={{ String($('Lookup Lead by Execution ID').first().json.gmail_message_id ?? '') }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2912,
+        656
+      ],
+      "id": "40e429b4-02e5-4205-8eec-4230e4ecca9c",
+      "name": "Verify UNKNOWN Persistence"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "REPLACE_WITH_GOOGLE_SPREADSHEET_ID",
+          "mode": "list",
+          "cachedResultName": "AI Lead CRM"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "REPLACE_WITH_REVIEW_QUEUE_SHEET_ID",
+          "mode": "list",
+          "cachedResultName": "Review Queue"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "review_id": "={{ 'review_err_' + $execution.id }}",
+            "created_at": "={{ $now.toISO() }}",
+            "lead_id": "={{ $('Lookup Lead by Execution ID').first().json.lead_id || '' }}",
+            "execution_id": "={{ $('Lookup Lead by Execution ID').first().json.execution_id || $('Normalize Error Details').first().json.execution_id || '' }}",
+            "email": "={{ $('Lookup Lead by Execution ID').first().json.email || '' }}",
+            "review_reason": "UNKNOWN_PERSISTENCE_CONFLICT",
+            "failed_node": "={{ $('Normalize Error Details').first().json.failed_node || '' }}",
+            "error_message": "={{ 'Original runtime error: ' + String($('Normalize Error Details').first().json.error_message || 'Unknown workflow error') + ' | UNKNOWN persistence verification failed. The expected RUNTIME_UNKNOWN state and/or preservation of email_status and gmail_message_id could not be confirmed. No further lead update or Gmail retry/resend was performed. Manual review required: check the failed execution and current lead state before taking any email action.' }}",
+            "email_status": "={{ $('Read Back UNKNOWN State').first().json.email_status ?? $('Lookup Lead by Execution ID').first().json.email_status ?? '' }}",
+            "review_status": "OPEN"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "review_id",
+              "displayName": "review_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "lead_id",
+              "displayName": "lead_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "execution_id",
+              "displayName": "execution_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email",
+              "displayName": "email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_reason",
+              "displayName": "review_reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "failed_node",
+              "displayName": "failed_node",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "error_message",
+              "displayName": "error_message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "email_status",
+              "displayName": "email_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_status",
+              "displayName": "review_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "review_notes",
+              "displayName": "review_notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "resolved_at",
+              "displayName": "resolved_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        3424,
+        672
+      ],
+      "id": "7c3e42a9-bdca-46d3-a1a3-cf09a23fe1ba",
+      "name": "Queue UNKNOWN Persistence Conflict"
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Normalize Error Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Error Details": {
+      "main": [
+        [
+          {
+            "node": "Classify Failure Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Failure Stage": {
+      "main": [
+        [
+          {
+            "node": "Can Lookup Lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can Lookup Lead?": {
+      "main": [
+        [
+          {
+            "node": "Lookup Lead by Execution ID",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Missing Execution Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Lead by Execution ID": {
+      "main": [
+        [
+          {
+            "node": "Lead Row Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Row Found?": {
+      "main": [
+        [
+          {
+            "node": "Route Failure Stage",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue Lead Not Found Review",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Failure Stage": {
+      "main": [
+        [
+          {
+            "node": "Persist BEFORE_GMAIL Failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Classify Gmail Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist AFTER_GMAIL Failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist UNKNOWN Failure",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist UNKNOWN Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist BEFORE_GMAIL Failure": {
+      "main": [
+        [
+          {
+            "node": "Read Back BEFORE_GMAIL State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Back BEFORE_GMAIL State": {
+      "main": [
+        [
+          {
+            "node": "Verify BEFORE_GMAIL Persistence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify BEFORE_GMAIL Persistence": {
+      "main": [
+        [
+          {
+            "node": "Queue Matched Error Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue BEFORE_GMAIL Persistence Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify Gmail Outcome": {
+      "main": [
+        [
+          {
+            "node": "Route Gmail Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Gmail Outcome": {
+      "main": [
+        [
+          {
+            "node": "Persist SEND_FAILED",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist SEND_UNCERTAIN",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Persist SEND_UNCERTAIN",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist SEND_FAILED": {
+      "main": [
+        [
+          {
+            "node": "Read Back SEND_FAILED State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Back SEND_FAILED State": {
+      "main": [
+        [
+          {
+            "node": "Verify SEND_FAILED Persistence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify SEND_FAILED Persistence": {
+      "main": [
+        [
+          {
+            "node": "Queue Matched Error Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue SEND_FAILED Persistence Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist SEND_UNCERTAIN": {
+      "main": [
+        [
+          {
+            "node": "Read Back SEND_UNCERTAIN State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Back SEND_UNCERTAIN State": {
+      "main": [
+        [
+          {
+            "node": "Verify SEND_UNCERTAIN Persistence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify SEND_UNCERTAIN Persistence": {
+      "main": [
+        [
+          {
+            "node": "Queue Matched Error Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue SEND_UNCERTAIN Persistence Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist AFTER_GMAIL Failure": {
+      "main": [
+        [
+          {
+            "node": "Read Back AFTER_GMAIL State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Back AFTER_GMAIL State": {
+      "main": [
+        [
+          {
+            "node": "Verify AFTER_GMAIL Persistence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify AFTER_GMAIL Persistence": {
+      "main": [
+        [
+          {
+            "node": "Queue Matched Error Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue AFTER_GMAIL Persistence Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Persist UNKNOWN Failure": {
+      "main": [
+        [
+          {
+            "node": "Read Back UNKNOWN State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Back UNKNOWN State": {
+      "main": [
+        [
+          {
+            "node": "Verify UNKNOWN Persistence",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify UNKNOWN Persistence": {
+      "main": [
+        [
+          {
+            "node": "Queue Matched Error Review",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Queue UNKNOWN Persistence Conflict",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}
