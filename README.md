@@ -11,6 +11,7 @@ These projects demonstrate how intelligent automations can simplify communicatio
 |------------------|-----------------|-----------------|
 | 🧠 **AI RAG Agent** | A Retrieval-Augmented Generation (RAG) agent using n8n, Supabase, and Gemini API. It stores, chunks, and retrieves context from PDF documents for intelligent Q&A. | [View Project →](./AI-RAG-Agent) |
 | 📧 **Gmail Automation Agent** | A workflow that integrates Google Contacts, Gmail, and Gemini API to auto-generate and send personalized emails via chat commands. | [View Project →](./Gmail-Automation-Agent) |
+| 🎯 **AI Lead Qualification & Follow-up** | A form-based workflow using Gemini, deterministic lead scoring, guarded Gmail replies, Google Sheets CRM, and a manual Review Queue. | [View Project →](./AI-Lead-Qualification-Followup) |
 
 > More projects will be added soon as this repository expands with new intelligent workflows.
 
@@ -23,6 +24,7 @@ These projects demonstrate how intelligent automations can simplify communicatio
    ```bash
    git clone https://github.com/saad-khanzada/n8n-Automation-Projects.git
    cd n8n-Automation-Projects
+   ```
 
 
 
