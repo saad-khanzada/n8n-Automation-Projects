@@ -1,16 +1,23 @@
 # AI Lead Qualification & Follow-up with n8n and Gemini
 
-A form-based lead qualification and email follow-up workflow built with **n8n**, **Google Gemini**, **Gmail**, **Google Sheets**, and **n8n Data Tables**.
+A two-workflow system for form-based lead qualification, email follow-up, and runtime failure handling, built with **n8n**, **Google Gemini**, **Gmail**, **Google Sheets**, and **n8n Data Tables**.
 
 The workflow validates inquiries, extracts structured lead information, applies deterministic scoring, drafts a customer response, and sends it only after email guardrails pass. Separate operational records and a human-facing review queue keep processing state and exceptions visible.
 
 ## Project status
 
-- Main workflow with 25 nodes
+- Main workflow with 25 nodes and companion Error Handler with 32 nodes
 - Live regression tests reported passed by the project author before this public export
-- Public template with credentials and instance-specific references removed
+- Both public workflow templates have credentials and instance-specific references removed
 - No client deployments, business results, or performance benchmarks claimed
-- The companion Error Handler is required for the complete runtime-failure safeguards and is **not included in this folder**
+- Both workflows are included; configure and link the Error Handler to enable the runtime-failure safeguards
+
+## Included workflows
+
+| Workflow | File | Role |
+|---|---|---|
+| AI Lead Qualification & Follow-up | [AI-Lead-Qualification-Followup.json](./AI-Lead-Qualification-Followup.json) | Intake, validation, qualification, guarded email delivery, and CRM updates |
+| AI Lead Qualification - Error Handler | [AI-Lead-Qualification-Error-Handler.json](./AI-Lead-Qualification-Error-Handler.json) | Runtime failure classification, state persistence verification, and review queues |
 
 ## What the workflow does
 
@@ -101,7 +108,7 @@ Invalid form input is logged in the backend; it does not use these three review 
 
 The complete system uses a separate **AI Lead Qualification - Error Handler** workflow. It classifies runtime failures relative to Gmail (`BEFORE_GMAIL`, `AT_GMAIL`, `AFTER_GMAIL`, or `UNKNOWN`) and distinguishes failed sends from uncertain outcomes (`SEND_FAILED` versus `SEND_UNCERTAIN`). It uses operational state and review queues to support investigation without blindly resending an email.
 
-The main workflow's original `settings.errorWorkflow` ID was removed because it belongs to a private instance. Obtain and import the companion workflow separately, configure its resources, and select it as this workflow's Error Workflow before enabling live use. The main JSON alone does not install these runtime-failure safeguards.
+The main workflow's original `settings.errorWorkflow` ID was removed because it belongs to a private instance. Import the included companion JSON as a second workflow, configure its resources, and manually select **AI Lead Qualification - Error Handler** in the main workflow's **Settings → Error Workflow** field. Save the main workflow before enabling live use. The main JSON alone does not install these runtime-failure safeguards.
 
 Keep all main-workflow node names unchanged: expressions and the companion handler depend on exact names, including `Normalize Input`, `Business Rules - Lead Scoring`, `Mark EMAIL_READY`, `Gmail Send`, `Update Final State`, and `Update AI Lead CRM`.
 
@@ -115,7 +122,7 @@ Keep all main-workflow node names unchanged: expressions and the companion handl
 | Google Sheets | OAuth credential with access to the CRM spreadsheet |
 | n8n Data Tables | A `lead_processing` table in the workflow's project |
 
-Create your own credentials and resources before configuring the imported workflow. No Python dependency file is required.
+Create your own credentials and resources before configuring the imported workflows. Both workflows must use the same `lead_processing` table and the same spreadsheet's `Review Queue` tab. No Python dependency file is required.
 
 ## Resource setup
 
@@ -183,10 +190,10 @@ Create these user-defined columns; n8n's built-in row fields are separate.
 
 ## Import and configuration
 
-1. Download [`AI-Lead-Qualification-Followup.json`](./AI-Lead-Qualification-Followup.json) and import it into n8n from a file. Keep the imported workflow inactive during setup.
+1. Download and import both [`AI-Lead-Qualification-Followup.json`](./AI-Lead-Qualification-Followup.json) and [`AI-Lead-Qualification-Error-Handler.json`](./AI-Lead-Qualification-Error-Handler.json) as separate workflows in the same n8n project. Keep the main workflow inactive during setup.
 2. Assign your Gemini credential to `Google Gemini Chat Model` and `Google Gemini Chat Model1`; assign Gmail OAuth to `Gmail Send`.
-3. Assign Google Sheets OAuth to `Update AI Lead CRM`, `Queue AI_OUTPUT_INVALID Review`, `Queue LEAD_REVIEW`, and `Queue EMAIL_DRAFT_INVALID Review`.
-4. Replace the resource placeholders by selecting your resources in each relevant node:
+3. Assign Google Sheets OAuth to `Update AI Lead CRM`, `Queue AI_OUTPUT_INVALID Review`, `Queue LEAD_REVIEW`, and `Queue EMAIL_DRAFT_INVALID Review` in the main workflow, and to all eight Google Sheets review-queue nodes in the Error Handler. The Error Handler does not need Gemini or Gmail credentials.
+4. Replace the resource placeholders in **both workflows** by selecting your resources in each relevant node:
 
    | Placeholder | Select |
    |---|---|
@@ -196,16 +203,16 @@ Create these user-defined columns; n8n's built-in row fields are separate.
    | `REPLACE_WITH_REVIEW_QUEUE_SHEET_ID` | The `Review Queue` tab |
 
 5. Confirm the column mappings still match the headers and table schema above. The CRM display timestamp expression uses `Asia/Karachi`; this public export preserves that behavior.
-6. Configure and link the companion Error Handler as described above. Do not activate the main workflow without this dependency if you expect the documented runtime safeguards.
+6. Open the main workflow's **Settings → Error Workflow**, manually select the imported **AI Lead Qualification - Error Handler**, and save. Importing both files does not create this link automatically because workflow IDs are instance-specific. Confirm the handler points to the same backend table and Review Queue before enabling live use.
 7. Confirm both configured Gemini models are available to your account. Model changes require renewed validation; the public export preserves the validated configuration.
 8. Test in a separate workflow using resources you control: invalid/corrected submissions, normal duplicates, malformed AI output, invalid drafts, and one controlled successful send to your own test inbox. Check the backend, review queue, and CRM results.
 9. When configuration and checks pass, activate the workflow and use the form URL generated by your n8n instance. No private form URL is included here.
 
 ## Public export and limitations
 
-The JSON contains placeholders instead of private spreadsheet, tab, and Data Table IDs. Credential references, webhook IDs, workflow/version/instance metadata, and the private Error Handler link are removed. It contains no pinned execution data.
+Both JSON files contain placeholders instead of private spreadsheet, tab, and Data Table IDs. Credential references, webhook IDs where present, and workflow/version/instance metadata are removed. The main workflow's private Error Handler link is also removed and must be configured after import. Neither file contains pinned execution data.
 
-The workflow logic, node names, node IDs, connections, scoring rules, and validated safeguards are preserved. Importing the JSON does not create the external table, sheet tabs, credentials, or companion Error Handler. Do not commit live submissions, execution exports, credentials, or private resource IDs when documenting your own deployment.
+The workflow logic, node names, node IDs, connections, scoring rules, and validated safeguards are preserved. Importing both JSON files creates the two workflow definitions, but does not create the external table, sheet tabs, credentials, or the link between the main workflow and Error Handler. Do not commit live submissions, execution exports, credentials, or private resource IDs when documenting your own deployment.
 
 ## License
 
