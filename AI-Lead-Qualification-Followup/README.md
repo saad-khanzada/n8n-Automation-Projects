@@ -47,6 +47,9 @@ Leads route to **HOT, WARM, COLD, NEEDS_INFO, or REVIEW**. The first four receiv
 
 Customer content is treated as untrusted data in both AI prompts. Model or parser exceptions before validation go to the runtime Error Handler; they are distinct from controlled validation rejections.
 
+<br><br>
+
+
 ## Data & state architecture
 
 **Business records, human review, and processing history have separate homes.**
