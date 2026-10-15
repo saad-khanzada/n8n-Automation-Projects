@@ -10,26 +10,7 @@ A two-workflow system that uses Gemini to interpret inquiries and draft replies,
 
 ## Architecture
 
-```mermaid
-flowchart TD
-    subgraph MAIN["Lead qualification & follow-up"]
-        A["Lead form"] --> B["Input validation & deduplication"]
-        B --> C["AI extraction & structured validation"]
-        C --> D["Deterministic scoring & lead routing"]
-        D --> E["AI email draft & output guardrails"]
-        E --> F["Gmail send"]
-        F --> G["Record final state & update CRM_Leads"]
-    end
-
-    C -->|"Invalid output"| R["Review Queue"]
-    D -->|"REVIEW / fallback"| R
-    E -->|"Invalid draft"| R
-
-    MAIN -.->|"Processing records"| S[("lead_processing")]
-    MAIN -.->|"Runtime failures"| H["Companion Error Handler"]
-    H -->|"Persist & read back"| S
-    H -->|"Failure / persistence conflict"| R
-```
+![AI Lead Qualification & Follow-up Workflow Architecture](./assets/ai-lead-workflow-architecture.png)
 
 Solid arrows show processing and review paths; dashed arrows show supporting state and runtime handling. Invalid form submissions are logged before AI processing; matching duplicates stop at the duplicate check.
 
