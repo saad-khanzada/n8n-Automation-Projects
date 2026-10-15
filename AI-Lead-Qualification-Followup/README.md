@@ -62,6 +62,8 @@ Customer content is treated as untrusted data in both AI prompts. Model or parse
 | **Review Queue** | Cases needing intervention, with the reason, lead/execution reference, email status, and resolution fields. |
 | **lead_processing** | Processing history: duplicate key, execution ID, statuses, score, Gmail message ID, and errors. |
 
+
+
 ## Companion Error Handler
 
 **The system distinguishes failures before, during, and after Gmail sending so it does not blindly resend when delivery status is uncertain.** The failed node name determines the stage.
@@ -74,6 +76,8 @@ Customer content is treated as untrusted data in both AI prompts. Model or parse
 | `UNKNOWN` | Preserve the existing email status and Gmail message ID while recording the failure. |
 
 Without recognized rejection evidence, a Gmail failure defaults to **SEND_UNCERTAIN** for investigation. The handler has no resend path. Missing execution IDs, unmatched lead records, and saved-state mismatches also have review paths.
+
+<br><br>
 
 ## Validation
 
@@ -93,6 +97,8 @@ The project author reported these **live n8n regression tests passed** before pu
 |---|---|
 | [Main workflow](./AI-Lead-Qualification-Followup.json) | Intake, qualification, email checks, Gmail, and CRM updates — 25 nodes. |
 | [Companion Error Handler](./AI-Lead-Qualification-Error-Handler.json) | Runtime failure classification, saved-state verification, and review handling — 32 nodes. |
+
+<br><br>
 
 ## Setup
 
