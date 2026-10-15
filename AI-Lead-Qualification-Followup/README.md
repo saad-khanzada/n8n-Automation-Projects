@@ -14,6 +14,11 @@ This system handles lead intake, qualification, and follow-up in one flow, with 
 
 **The main flow:** validate the inquiry → check for duplicates → extract and qualify the lead → check the email draft → send through Gmail → record the outcome in the CRM. Exceptions follow controlled review paths.
 
+
+
+
+
+
 ## Engineering highlights
 
 | Design choice | Why it matters |
