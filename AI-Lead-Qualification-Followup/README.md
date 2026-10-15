@@ -1,92 +1,85 @@
 # AI Lead Qualification & Follow-up
 
-**From incoming inquiry to qualified lead, guarded email response, and an auditable CRM record.**
+**Turn incoming inquiries into qualified leads, tailored email replies, and traceable CRM records.**
 
-A two-workflow system that uses Gemini to interpret inquiries and draft replies, deterministic rules to qualify leads, and a dedicated Error Handler to manage failures around email delivery.
+This system handles lead intake, qualification, and follow-up in one flow, with a separate queue for cases that need human judgment. Gemini extracts information and drafts replies; fixed workflow rules control scoring, validation, sending, and review.
 
 **n8n · Gemini · Gmail · Google Sheets · Data Tables**
 
-[Main workflow](./AI-Lead-Qualification-Followup.json) · [Error Handler](./AI-Lead-Qualification-Error-Handler.json) · [Setup](#setup)
+[Main workflow](./AI-Lead-Qualification-Followup.json) · [Error Handler](./AI-Lead-Qualification-Error-Handler.json) · [Validation](#validation) · [Setup](#setup)
 
 ## Architecture
 
 ![AI Lead Qualification & Follow-up Workflow Architecture](./assets/ai-lead-workflow-architecture.png)
 
-Solid arrows show processing and review paths; dashed arrows show supporting state and runtime handling. Invalid form submissions are logged before AI processing; matching duplicates stop at the duplicate check.
+**The main flow:** validate the inquiry → check for duplicates → extract and qualify the lead → check the email draft → send through Gmail → record the outcome in the CRM. Exceptions follow controlled review paths.
 
 ## Engineering highlights
 
-| Design choice | What it demonstrates |
+| Design choice | Why it matters |
 |---|---|
-| **AI extraction with a contract** | Seven structured fields are checked for types, allowed values, exact keys, and consistency with the submitted choices. |
-| **Business scores owned by code** | Service-specific budget fit, intent, timeline, and clarity produce a fixed 0–10 score; AI confidence triggers review rather than adding points. |
-| **Duplicate handling that permits corrections** | Normalized email + message identifies duplicates; invalid submissions use a prefixed audit key so a corrected inquiry can proceed. |
-| **Controlled customer communication** | Status-specific drafts pass recipient, shape, length, HTML, link, and internal-phrase checks before Gmail. |
-| **Failures checked after persistence** | The companion workflow classifies the failure, writes the operational state, reads it back, and routes mismatches to a persistence-conflict review entry. |
+| **Checked AI output** | Extracted information must match a defined structure and the submitted choices before it is used. |
+| **Rule-based scoring** | Code calculates a fixed 0–10 score from budget fit, intent, timeline, and clarity; the AI does not assign the business score. |
+| **Duplicates without blocking corrections** | Matching email + message stops repeat processing, while a corrected invalid submission can proceed. |
+| **Email checks before sending** | Drafts must pass recipient, format, length, HTML, link, and internal-phrase checks before reaching Gmail. |
+| **Verified failure records** | After recording a failure, the Error Handler reads the state back to confirm it was saved; mismatches go to manual review. |
 
-**Routing has explicit precedence:** confidence below `0.60` or category `Other` → `REVIEW`; missing details or unclear intent → `NEEDS_INFO`; otherwise, scores ≥8 → `HOT`, ≥5 → `WARM`, and lower scores → `COLD`.
-
-`HOT`, `WARM`, `COLD`, and `NEEDS_INFO` receive tailored email drafts. `REVIEW` and unmatched routing go to human review without sending an email.
+Leads route to **HOT, WARM, COLD, NEEDS_INFO, or REVIEW**. The first four receive tailored email drafts; REVIEW and unmatched routes go to human review without sending.
 
 ## Reliability & safety
 
-| Risk | Handling |
-|---|---|
-| Bad form input | Logged as `INVALID_INPUT` before AI or Gmail runs. |
-| Duplicate lead | A matching normal dedupe key stops reprocessing. |
-| Malformed AI output | Null/type-safe validation sends rejected output to `AI_OUTPUT_INVALID` review. |
-| Invalid email draft | Guardrails block Gmail and send the draft failure to `EMAIL_DRAFT_INVALID` review. |
-| Lead requiring judgment | Low-confidence or uncategorized leads enter the Review Queue. |
-| Ambiguous Gmail result | Classified as `SEND_UNCERTAIN`; the Error Handler has no resend path. |
-| State write mismatch | Read-back checks route the conflict for human investigation. |
+**Rejected input or output is stopped before it can reach the next consequential step.**
 
-Customer content is treated as untrusted data in both AI prompts. Model or parser exceptions that occur before validation are handled as runtime failures, rather than being confused with a controlled validation rejection.
+| Risk | Controlled response |
+|---|---|
+| Invalid form input | Record `INVALID_INPUT`; stop before AI or Gmail. |
+| Malformed AI output | Send rejected output to `AI_OUTPUT_INVALID` review. |
+| Invalid email draft | Block Gmail and queue `EMAIL_DRAFT_INVALID` review. |
+| Lead requiring judgment | Send low-confidence or uncategorized leads to the Review Queue. |
+
+Customer content is treated as untrusted data in both AI prompts. Model or parser exceptions before validation go to the runtime Error Handler; they are distinct from controlled validation rejections.
 
 ## Data & state architecture
 
-| Layer | Responsibility |
-|---|---|
-| **CRM_Leads** | Human-facing inquiry and qualification details, appended or updated by `Lead ID` after the successful email/final-state path. |
-| **Review Queue** | Actionable exceptions with reason, lead/execution reference, email status, and resolution fields. |
-| **lead_processing** | Technical audit state: dedupe key, execution ID, processing/email status, score, Gmail message ID, and errors. |
+**Business records, human review, and processing history have separate homes.**
 
-This keeps business records separate from processing state and work requiring human intervention.
+| Layer | Purpose |
+|---|---|
+| **CRM_Leads** | Inquiry and qualification details for people to use, written by `Lead ID` after the successful email/final-state path. |
+| **Review Queue** | Cases needing intervention, with the reason, lead/execution reference, email status, and resolution fields. |
+| **lead_processing** | Processing history: duplicate key, execution ID, statuses, score, Gmail message ID, and errors. |
 
 ## Companion Error Handler
 
-An email-send failure and a CRM-write failure require different responses. The handler uses the failed node name to classify where execution stopped:
+**The system distinguishes failures before, during, and after Gmail sending so it does not blindly resend when delivery status is uncertain.** The failed node name determines the stage.
 
 | Stage | Handling for a matched lead |
 |---|---|
-| `BEFORE_GMAIL` | Records the pre-send failure and verifies the resulting state. |
-| `AT_GMAIL` | Uses structured HTTP/provider evidence to distinguish `SEND_FAILED` from `SEND_UNCERTAIN`. |
-| `AFTER_GMAIL` | Records the downstream failure with `EMAIL_SENT`, without sending again. |
-| `UNKNOWN` | Records the failure while preserving the existing email status and Gmail message ID. |
+| `BEFORE_GMAIL` | Record the pre-send failure and verify the saved state. |
+| `AT_GMAIL` | Use HTTP/provider evidence to distinguish `SEND_FAILED` from `SEND_UNCERTAIN`. |
+| `AFTER_GMAIL` | Record the downstream failure with `EMAIL_SENT`; do not send again. |
+| `UNKNOWN` | Preserve the existing email status and Gmail message ID while recording the failure. |
 
-**Uncertainty is preserved:** without recognized rejection evidence, a Gmail failure defaults to `SEND_UNCERTAIN`. It is escalated for investigation, not automatically retried. Missing execution IDs or unmatched lead records also have dedicated review paths.
+Without recognized rejection evidence, a Gmail failure defaults to **SEND_UNCERTAIN** for investigation. The handler has no resend path. Missing execution IDs, unmatched lead records, and saved-state mismatches also have review paths.
 
 ## Validation
 
-The project author reported the following **live n8n regression tests passed** before publishing these templates. This is functional validation, not a throughput benchmark or reliability guarantee.
+The project author reported these **live n8n regression tests passed** before publishing the templates. These are functional checks, not performance benchmarks or reliability guarantees.
 
-| Regression | Validated behavior |
+| Scenario | Validated result |
 |---|---|
-| Corrected `INVALID_INPUT` submission | Same email + message can proceed after correcting the invalid field. |
+| Corrected invalid submission | Same email + message proceeds after correcting the invalid field. |
 | Normal duplicate | Matching non-INVALID_INPUT lead remains blocked. |
-| Missing/null/malformed AI output | Rejected through the controlled failure path without validation-expression errors. |
-| Malformed email draft | Rejected before Gmail through the existing review path. |
-| End-to-end email + CRM | HOT / score 8 fixture completed with one Gmail send, stored message ID, `COMPLETED` / `EMAIL_SENT`, a CRM row, and no Error Handler invocation. |
-
-## Skills demonstrated
-
-**LLM structured outputs & guardrails** · **n8n workflow engineering** · **Deterministic business logic** · **State management & audit trails** · **Failure classification & persistence verification** · **Google APIs / OAuth & CRM integration** · **Regression testing**
+| Missing, null, or malformed AI output | Controlled rejection without validation-expression errors. |
+| Malformed email draft | Blocked before Gmail and sent to review. |
+| End-to-end Gmail + CRM | HOT / score 8 fixture: one Gmail send, stored message ID, `COMPLETED` / `EMAIL_SENT`, a CRM row, and no Error Handler invocation. |
 
 ## Project files
 
 | Workflow | Role |
 |---|---|
-| [AI-Lead-Qualification-Followup.json](./AI-Lead-Qualification-Followup.json) | Main workflow: intake, qualification, email guardrails, Gmail, and CRM updates — 25 nodes. |
-| [AI-Lead-Qualification-Error-Handler.json](./AI-Lead-Qualification-Error-Handler.json) | Companion workflow: runtime classification, failure-state persistence, read-back verification, and review queues — 32 nodes. |
+| [Main workflow](./AI-Lead-Qualification-Followup.json) | Intake, qualification, email checks, Gmail, and CRM updates — 25 nodes. |
+| [Companion Error Handler](./AI-Lead-Qualification-Error-Handler.json) | Runtime failure classification, saved-state verification, and review handling — 32 nodes. |
 
 ## Setup
 
@@ -98,6 +91,20 @@ The project author reported the following **live n8n regression tests passed** b
 6. **Validate before activation.** Use a separate test copy and resources you control, check the regression cases above, and verify state, review, and CRM writes before enabling the live form.
 
 Keep node names unchanged: expressions and failure classification depend on exact names. Human review does not automatically resolve or resend a failed inquiry.
+
+## Technical reference
+
+<details>
+<summary><strong>Validation, scoring & routing rules</strong></summary>
+
+- **AI extraction:** seven structured fields are checked for types, allowed values, exact keys, and consistency with submitted choices. Null/type-safe validation handles malformed output through the controlled rejection path.
+- **Scoring:** service-specific budget fit, intent, timeline, and clarity determine the 0–10 score. AI confidence triggers review rather than adding points.
+- **Routing precedence:** confidence below `0.60` or category `Other` → `REVIEW`; missing details or unclear intent → `NEEDS_INFO`; otherwise, scores ≥8 → `HOT`, ≥5 → `WARM`, and lower scores → `COLD`.
+- **Duplicate key:** normalized email + message identifies duplicates. Invalid submissions store a prefixed audit key so a corrected inquiry can use the normal key.
+- **Email guardrails:** check recipient, output shape, length, HTML, links, and internal phrases before Gmail.
+- **Failure persistence:** write the operational state, read it back, and route mismatches to a persistence-conflict review entry.
+
+</details>
 
 <details>
 <summary><strong>Resource placeholders</strong></summary>
@@ -185,6 +192,8 @@ For an existing installation, back up the table before migrating old invalid sub
 
 ## Template notes
 
-Both exports use public placeholders and include no credentials. Validate your resource bindings, model access, and Error Workflow link before production use. Duplicate protection is a lookup followed by an insert, not an atomic lock; **exactly-once delivery is not guaranteed**. Prompt restrictions and output checks do not guarantee every generated response is accurate or safe.
+Both workflows use placeholders instead of private resource IDs and include no credentials. Configure your own resources and validate the setup before production use.
+
+**Exactly-once delivery is not guaranteed:** duplicate checking and record creation are separate operations, not an atomic lock. AI prompt restrictions and output checks also cannot guarantee every response is accurate or safe.
 
 [Back to project index](../README.md) · MIT License
