@@ -15,7 +15,7 @@ This system handles lead intake, qualification, and follow-up in one flow, with 
 **The main flow:** validate the inquiry → check for duplicates → extract and qualify the lead → check the email draft → send through Gmail → record the outcome in the CRM. Exceptions follow controlled review paths.
 
 
-
+<br><br>
 
 
 
@@ -30,6 +30,9 @@ This system handles lead intake, qualification, and follow-up in one flow, with 
 | **Verified failure records** | After recording a failure, the Error Handler reads the state back to confirm it was saved; mismatches go to manual review. |
 
 Leads route to **HOT, WARM, COLD, NEEDS_INFO, or REVIEW**. The first four receive tailored email drafts; REVIEW and unmatched routes go to human review without sending.
+
+<br><br>
+
 
 ## Reliability & safety
 
