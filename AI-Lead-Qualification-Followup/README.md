@@ -8,6 +8,8 @@ This system handles lead intake, qualification, and follow-up in one flow, with 
 
 [Main workflow](./AI-Lead-Qualification-Followup.json) · [Error Handler](./AI-Lead-Qualification-Error-Handler.json) · [Validation](#validation) · [Setup](#setup)
 
+<br><br>
+
 ## Architecture
 
 ![AI Lead Qualification & Follow-up Workflow Architecture](./assets/ai-lead-workflow-architecture.png)
