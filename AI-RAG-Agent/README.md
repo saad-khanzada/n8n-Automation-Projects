@@ -4,6 +4,8 @@ A working document-Q&A prototype built with **n8n**, **Google Gemini**, **Supaba
 
 The workflow ingests a PDF from Google Drive, converts the document into Gemini embeddings, stores the resulting chunks in Supabase, and lets an AI agent retrieve relevant passages before answering a user's question.
 
+**[Read the full case study on my portfolio](https://saadkabeer.online/projects/rag-document-qa-agent).**
+
 ## Project status
 
 - Working prototype
