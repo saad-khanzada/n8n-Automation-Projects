@@ -8,7 +8,7 @@ This system handles lead intake, qualification, and follow-up in one flow, with 
 
 [Main workflow](./AI-Lead-Qualification-Followup.json) · [Error Handler](./AI-Lead-Qualification-Error-Handler.json) · [Validation](#validation) · [Setup](#setup)
 
-**[Read the full case study on my portfolio](https://saadkabeer.online/projects/ai-lead-qualification-and-follow-up).**
+**[Read the full case study on my Website](https://saadkabeer.online/projects/ai-lead-qualification-and-follow-up).**
 
 <br><br>
 
